@@ -55,6 +55,15 @@ class ResponsiveLayout {
     return isTablet(context) && isLandscape(context);
   }
 
+  /// Whether the device is a **phone** (not tablet) in landscape mode.
+  ///
+  /// 手机横屏时宽度富余但高度极小（可用高度通常只有 320~420dp），
+  /// 因此竖排布局几乎必然溢出；横屏时同样需要左右分栏，
+  /// 只是所有控件都要用紧凑尺寸。
+  static bool isPhoneLandscape(BuildContext context) {
+    return isLandscape(context) && !isTablet(context);
+  }
+
   // ── Layout mode ────────────────────────────────────────────────────
 
   /// Returns the optimal layout mode for the current screen.
@@ -138,6 +147,7 @@ class ResponsiveLayout {
 
   /// Returns a responsive album art size.
   static double albumArtSize(BuildContext context) {
+    if (isPhoneLandscape(context)) return 200;
     if (isTabletLandscape(context)) return 380;
     if (isTablet(context)) return 300;
     return 280;

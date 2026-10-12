@@ -7,6 +7,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../shared/widgets/music_cover_image.dart';
 import '../../../shared/widgets/song_list_item.dart';
+import '../../../shared/widgets/song_action_sheet.dart';
 import '../../../shared/widgets/song_selection.dart';
 import '../../player/presentation/mini_player.dart';
 import '../application/search_providers.dart';
@@ -1067,6 +1068,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               showQuality: true,
               showDuration: true,
               showMenuButton: true,
+              // 「播放」= 搜索结果全部加入队列并从该曲开始依次播放；
+              // 「播放并替换播放列表」= 只播这一首并清空队列。
+              onMenuTap: () => SongActionSheet.show(
+                context,
+                song: song,
+                playlistSongs: songs,
+                showPlayAndReplaceQueue: true,
+              ),
               onPlayTap: () async {
                 final now = DateTime.now();
                 final lastTap = _globalLastTapTime;
@@ -1173,6 +1182,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           showQuality: true,
           showDuration: true,
           showMenuButton: true,
+          // 「播放」= 搜索结果全部加入队列并从该曲开始依次播放；
+          // 「播放并替换播放列表」= 只播这一首并清空队列。
+          onMenuTap: () => SongActionSheet.show(
+            context,
+            song: song,
+            playlistSongs: songs,
+            showPlayAndReplaceQueue: true,
+          ),
           selectionMode: selecting,
           selected: _selection.isSelected(song.id),
           onSelectionToggle: (s) => _selection.toggle(s.id),

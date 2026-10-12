@@ -111,9 +111,14 @@ class _SleepTimerPickerSheetState extends ConsumerState<_SleepTimerPickerSheet> 
       ),
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.9,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
             const SizedBox(height: 8),
             Container(
               width: 40,
@@ -253,6 +258,8 @@ class _SleepTimerPickerSheetState extends ConsumerState<_SleepTimerPickerSheet> 
               ),
             const SizedBox(height: 12),
           ],
+          ),
+          ),
         ),
       ),
     );

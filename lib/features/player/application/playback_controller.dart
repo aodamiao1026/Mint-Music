@@ -1327,16 +1327,40 @@ class PlaybackController extends StateNotifier<PlaybackState> {
   }
 
   /// 添加到队列末尾（照搬 CeruMusic addToPlaylistEnd）
+  ///
+  /// 队列为空（或还没有当前歌曲）时，视为「用这些歌重新开始播放」：
+  /// 直接从第一首播起。否则只把歌塞进队列而不播放，App 内不会出现迷你播放栏，
+  /// 用户也无法再对队列做增删操作。
   Future<void> appendToQueue(List<Song> songs) async {
     if (songs.isEmpty) return;
+    // 队列为空且无当前歌曲：从头开始播放这批歌曲。
+    if (state.queue.isEmpty && state.currentSong == null) {
+      _cancelPendingAutoNext();
+      _pendingRestorePosition = null;
+      _pendingRestoreSongId = null;
+      onClearPlaybackState?.call();
+      await setQueue(songs);
+      return;
+    }
     // Remote URLs are transient. Resolve lazily when a song becomes current.
     final newQueue = [...state.queue, ...songs];
     state = state.copyWith(queue: newQueue);
   }
 
   /// 插入到当前歌曲之后（照搬 CeruMusic addToPlaylistAndPlay 的插入逻辑）
+  ///
+  /// 与 [appendToQueue] 一样：队列为空且没有当前歌曲时没有「下一首」可言，
+  /// 直接从这批歌曲开始播放。
   Future<void> insertNext(List<Song> songs) async {
     if (songs.isEmpty) return;
+    if (state.queue.isEmpty && state.currentSong == null) {
+      _cancelPendingAutoNext();
+      _pendingRestorePosition = null;
+      _pendingRestoreSongId = null;
+      onClearPlaybackState?.call();
+      await setQueue(songs);
+      return;
+    }
     final insertIndex = _currentIndex + 1;
     final newQueue = List<Song>.from(state.queue);
     newQueue.insertAll(insertIndex, songs);
@@ -1398,9 +1422,20 @@ class PlaybackController extends StateNotifier<PlaybackState> {
   }
 
   /// 清空队列
+  ///
+  /// 需要三件事同时发生，否则会出现「幽灵播放」：
+  /// 1. 复位 [state]，让 5s 一次的保存定时器立刻短路，不再写盘；
+  /// 2. 清掉持久化的 `last_playback_state`，否则下次启动会把旧队列复活；
+  /// 3. 清空媒体会话，让通知栏/系统媒体控制不再显示已删除的曲目。
   Future<void> clearQueue() async {
-    await _audioHandler.stop();
+    _cancelPendingAutoNext();
+    // 用户主动清空，不应用待恢复进度
+    _pendingRestorePosition = null;
+    _pendingRestoreSongId = null;
+    // 先断开源状态，再清持久化，避免保存定时器在两者之间把旧队列写回去。
     state = const PlaybackState();
+    onClearPlaybackState?.call();
+    await _audioHandler.clearMediaSession();
   }
 
   // ==================== 音质切换 ====================

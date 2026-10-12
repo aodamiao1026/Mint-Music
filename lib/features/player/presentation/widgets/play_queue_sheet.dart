@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'dart:async';
 
@@ -26,8 +27,6 @@ void showPlayQueueSheet(
   required PlaybackState playbackState,
   required PlaybackController controller,
 }) {
-  final queue = playbackState.queue;
-  final currentIndex = playbackState.currentIndex;
   showModalBottomSheet(
     context: context,
     sheetAnimationStyle: const AnimationStyle(
@@ -36,30 +35,21 @@ void showPlayQueueSheet(
     ),
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
-    builder: (ctx) => _PlayQueueSheetContent(
-      queue: queue,
-      currentIndex: currentIndex,
-      controller: controller,
-    ),
+    builder: (ctx) => _PlayQueueSheetContent(controller: controller),
   );
 }
 
-class _PlayQueueSheetContent extends StatefulWidget {
-  const _PlayQueueSheetContent({
-    required this.queue,
-    required this.currentIndex,
-    required this.controller,
-  });
+class _PlayQueueSheetContent extends ConsumerStatefulWidget {
+  const _PlayQueueSheetContent({required this.controller});
 
-  final List queue;
-  final int currentIndex;
   final PlaybackController controller;
 
   @override
-  State<_PlayQueueSheetContent> createState() => _PlayQueueSheetContentState();
+  ConsumerState<_PlayQueueSheetContent> createState() =>
+      _PlayQueueSheetContentState();
 }
 
-class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
+class _PlayQueueSheetContentState extends ConsumerState<_PlayQueueSheetContent> {
   final ScrollController _listScrollController = ScrollController();
 
   @override
@@ -69,7 +59,9 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
   }
 
   void _locateCurrentSong() {
-    if (widget.currentIndex < 0 || widget.currentIndex >= widget.queue.length) {
+    final state = ref.read(playbackControllerProvider);
+    final index = state.currentIndex;
+    if (index < 0 || index >= state.queue.length) {
       return;
     }
     if (!_listScrollController.hasClients) return;
@@ -77,7 +69,7 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
     unawaited(
       scrollToItemIndex(
         _listScrollController,
-        index: widget.currentIndex,
+        index: index,
         itemExtent: _kQueueItemExtent,
       ),
     );
@@ -85,6 +77,11 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
 
   @override
   Widget build(BuildContext context) {
+    // 队列是「活」的：直接 watch provider，删除某首后就地刷新列表，
+    // 不需要关闭弹层再重新打开。
+    final playbackState = ref.watch(playbackControllerProvider);
+    final queue = playbackState.queue;
+    final currentIndex = playbackState.currentIndex;
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -117,7 +114,7 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
                         Row(
                           children: [
                             Text(
-                              context.tr('${widget.queue.length}首'),
+                              context.tr('${queue.length}首'),
                               style: const TextStyle(color: AppColors.textHint),
                             ),
                             const SizedBox(width: 16),
@@ -139,7 +136,7 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
                       ],
                     ),
                   ),
-                  if (widget.queue.isEmpty)
+                  if (queue.isEmpty)
                     Expanded(
                       child: Center(
                         child: Text(
@@ -152,14 +149,14 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
                     Expanded(
                       child: ListView.builder(
                         controller: _listScrollController,
-                        itemCount: widget.queue.length,
+                        itemCount: queue.length,
                         // 与定位用的行高常量一致，避免估算行高累积误差
                         itemExtent: _kQueueItemExtent,
                         addAutomaticKeepAlives: false,
                         addRepaintBoundaries: true,
                         itemBuilder: (context, index) {
-                          final queueSong = widget.queue[index];
-                          final isCurrent = index == widget.currentIndex;
+                          final queueSong = queue[index];
+                          final isCurrent = index == currentIndex;
                           return ListTile(
                             leading: SizedBox(
                               width: 72,
@@ -248,8 +245,9 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
                                       color: AppColors.textHint,
                                     ),
                                     onPressed: () {
+                                      // 不关闭弹层：就地删除并继续，
+                                      // 否则每删一首都要重新点开迷你播放栏的队列。
                                       widget.controller.removeFromQueue(index);
-                                      Navigator.pop(context);
                                     },
                                   ),
                             onTap: () {
@@ -263,7 +261,7 @@ class _PlayQueueSheetContentState extends State<_PlayQueueSheetContent> {
                 ],
               ),
               // 定位当前播放歌曲的悬浮按钮（列表右侧悬浮）
-              if (widget.currentIndex >= 0 && widget.currentIndex < widget.queue.length)
+              if (currentIndex >= 0 && currentIndex < queue.length)
                 Positioned(
                   right: 60,
                   bottom: 40,

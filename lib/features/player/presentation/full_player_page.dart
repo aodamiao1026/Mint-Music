@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -33,8 +35,9 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
   bool _lyricsRequested = false;
   bool _lyricsPageBuilt = false;
 
-  /// Tablet landscape: when true, lyrics occupy the full area (cover hidden).
-  bool _tabletLyricsFullMode = false;
+  /// Landscape (tablet & phone): when true, lyrics occupy the full area
+  /// (cover hidden).
+  bool _landscapeLyricsFullMode = false;
 
   /// 退出动画期间隐藏 AMLL WebView：滑动阶段平台视图不参与合成，
   /// 中低端手机上也能流畅滑动（平台视图随路由变换会导致严重掉帧/闪回）。
@@ -127,7 +130,9 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
                 animate: bgAnimation,
               ),
             ),
-            if (audioVisualizer)
+            // 手机横屏左栏是紧凑的「封面 + 控件」，没有留给频谱条的空间，
+            // 否则它会横跨两栏压在播放控制上。
+            if (audioVisualizer && !ResponsiveLayout.isPhoneLandscape(context))
               const Positioned(
                 left: 28,
                 right: 28,
@@ -152,6 +157,11 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
                       isPlaying: isPlaying,
                       audioVisualizer: audioVisualizer,
                     );
+                  }
+                  if (ResponsiveLayout.isPhoneLandscape(context)) {
+                    // Phone landscape (system auto-rotate on): same split
+                    // layout as tablet, but with compact controls.
+                    return _buildPhoneLandscapeLayout(isPlaying: isPlaying);
                   }
                   // Phone / tablet portrait: vertical layout with PageView
                   return Column(
@@ -210,17 +220,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
                       _PlayerSongInfo(),
                       _PlayerProgressBar(),
                       const SizedBox(height: 12),
-                      _PlayerControls(
-                        onQueue: () {
-                          showPlayQueueSheet(
-                            context,
-                            playbackState: ref.read(playbackControllerProvider),
-                            controller: ref.read(
-                              playbackControllerProvider.notifier,
-                            ),
-                          );
-                        },
-                      ),
+                      _PlayerControls(onQueue: _openPlayQueue),
                       SizedBox(height: 16),
                     ],
                   );
@@ -235,7 +235,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
 
   /// Tablet landscape layout with two modes:
   ///
-  /// Split mode (_tabletLyricsFullMode == false):
+  /// Split mode (_landscapeLyricsFullMode == false):
   /// ┌─────────────────────────────────────────────┐
   /// │  ⬇ 返回          播放模式          🎵 歌词  │
   /// ├──────────────┬──────────────────────────────┤
@@ -246,7 +246,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
   /// │   播放控制    │                              │
   /// └──────────────┴──────────────────────────────┘
   ///
-  /// Full-lyrics mode (_tabletLyricsFullMode == true):
+  /// Full-lyrics mode (_landscapeLyricsFullMode == true):
   /// ┌─────────────────────────────────────────────┐
   /// │  ⬇ 返回          播放模式          🖼 封面  │
   /// │                                             │
@@ -261,17 +261,45 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
       children: [
         // Full-width header: back (left) — play mode (center) — toggle (right)
         _PlayerHeader(
-          currentPage: _tabletLyricsFullMode ? 1 : 0,
+          currentPage: _landscapeLyricsFullMode ? 1 : 0,
           onBack: () => _beginExit(),
           onTogglePage: () {
-            setState(() => _tabletLyricsFullMode = !_tabletLyricsFullMode);
+            setState(() => _landscapeLyricsFullMode = !_landscapeLyricsFullMode);
           },
         ),
         // Main content
         Expanded(
-          child: _tabletLyricsFullMode
-              ? _buildTabletFullLyricsMode(isPlaying: isPlaying)
+          child: _landscapeLyricsFullMode
+              ? _buildLandscapeFullLyricsMode(isPlaying: isPlaying)
               : _buildTabletSplitMode(isPlaying: isPlaying),
+        ),
+      ],
+    );
+  }
+
+  /// Phone landscape layout (reached when the system auto-rotate is on).
+  ///
+  /// Structure is identical to the tablet landscape layout — cover on top,
+  /// playback controls underneath on the left, lyrics on the right — but the
+  /// available height is tiny (usually 320~420dp), so:
+  ///   * the header and all controls use their compact variants;
+  ///   * the cover size is derived from the leftover height instead of a
+  ///     fixed breakpoint value, so no device can overflow.
+  Widget _buildPhoneLandscapeLayout({required bool isPlaying}) {
+    return Column(
+      children: [
+        _PlayerHeader(
+          currentPage: _landscapeLyricsFullMode ? 1 : 0,
+          compact: true,
+          onBack: () => _beginExit(),
+          onTogglePage: () {
+            setState(() => _landscapeLyricsFullMode = !_landscapeLyricsFullMode);
+          },
+        ),
+        Expanded(
+          child: _landscapeLyricsFullMode
+              ? _buildLandscapeFullLyricsMode(isPlaying: isPlaying)
+              : _buildPhoneSplitMode(isPlaying: isPlaying),
         ),
       ],
     );
@@ -300,17 +328,7 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
               _PlayerSongInfo(),
               _PlayerProgressBar(),
               const SizedBox(height: 8),
-              _PlayerControls(
-                onQueue: () {
-                  showPlayQueueSheet(
-                    context,
-                    playbackState: ref.read(playbackControllerProvider),
-                    controller: ref.read(
-                      playbackControllerProvider.notifier,
-                    ),
-                  );
-                },
-              ),
+              _PlayerControls(onQueue: _openPlayQueue),
               const SizedBox(height: 16),
             ],
           ),
@@ -318,19 +336,86 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
         // Right side: lyrics (full height)
         Expanded(
           flex: 5,
-          child: _buildTabletLyricsPanel(),
+          child: _buildLandscapeLyricsPanel(),
         ),
       ],
     );
   }
 
+  /// Phone landscape split mode: same two-column structure as the tablet one
+  /// (equal halves, split line aligned with the centered play-mode label in the
+  /// header), with compact controls.
+  ///
+  /// Left column: cover on the left, song title/artist + favorite/menu buttons
+  /// stacked in a column on its right, then progress bar and controls below.
+  Widget _buildPhoneSplitMode({required bool isPlaying}) {
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // 上半区（封面 + 信息列）吃掉底部控件之外的全部高度。
+              final topArea = math.max(
+                72.0,
+                constraints.maxHeight - _phoneLandscapeReservedHeight,
+              );
+              // 封面：不超过上半区高度，也不超过左栏宽度的 46%。
+              final coverSize = math.min(
+                topArea - 8,
+                math.max(64.0, constraints.maxWidth * 0.46),
+              );
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: SizedBox(
+                      height: topArea,
+                      child: Row(
+                        children: [
+                          // scaleDown 兜底：极小屏（如分屏）时自动缩小封面而不是溢出。
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: _PlayerCoverPage(
+                              isPlaying: isPlaying,
+                              coverSize: coverSize,
+                              onTapCover: null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // 歌名/歌手 + 收藏/功能菜单：右端与进度条右端齐平。
+                          const Expanded(
+                            child: _PlayerSongInfo(compact: true, side: true),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: const _PlayerProgressBar(compact: true),
+                  ),
+                  const SizedBox(height: 10),
+                  _PlayerControls(compact: true, onQueue: _openPlayQueue),
+                  const SizedBox(height: 6),
+                ],
+              );
+            },
+          ),
+        ),
+        const Spacer(flex: 1),
+        Expanded(flex: 5, child: _buildLandscapeLyricsPanel()),
+      ],
+    );
+  }
+
   /// Full-lyrics mode: lyrics occupy the entire area.
-  Widget _buildTabletFullLyricsMode({required bool isPlaying}) {
-    return _buildTabletLyricsPanel();
+  Widget _buildLandscapeFullLyricsMode({required bool isPlaying}) {
+    return _buildLandscapeLyricsPanel();
   }
 
   /// Shared lyrics panel builder.
-  Widget _buildTabletLyricsPanel() {
+  Widget _buildLandscapeLyricsPanel() {
     return ListenableBuilder(
       listenable: AmllToggleService(),
       builder: (context, _) {
@@ -345,21 +430,41 @@ class _FullPlayerPageState extends ConsumerState<FullPlayerPage> {
           child: _PlayerLyricsPage(
             amllKey: _amllKey,
             hideWebView: _isLeaving,
+            landscape: true,
           ),
         );
       },
     );
   }
+
+  /// 打开播放队列（竖屏 / 平板横屏 / 手机横屏共用）。
+  void _openPlayQueue() {
+    showPlayQueueSheet(
+      context,
+      playbackState: ref.read(playbackControllerProvider),
+      controller: ref.read(playbackControllerProvider.notifier),
+    );
+  }
+
+  /// 手机横屏左栏底部固定区（进度条 + 播放控制 + 内边距）的高度。
+  /// 封面 + 信息列的上半区高度 = 左栏可用高度 - 该值；封面再由
+  /// [FittedBox] 兜底缩放，因此任何机型都不会溢出。
+  static const double _phoneLandscapeReservedHeight = 104;
 }
 
 class _PlayerHeader extends ConsumerWidget {
   final int currentPage;
   final VoidCallback onTogglePage;
   final VoidCallback onBack;
+
+  /// 紧凑模式：手机横屏等高度受限的场景。
+  final bool compact;
+
   const _PlayerHeader({
     required this.currentPage,
     required this.onTogglePage,
     required this.onBack,
+    this.compact = false,
   });
 
   @override
@@ -381,13 +486,21 @@ class _PlayerHeader extends ConsumerWidget {
     }
 
     return Padding(
-      padding: EdgeInsets.only(top: 8, left: 8, right: 8),
+      padding: EdgeInsets.only(
+        top: compact ? 2 : 8,
+        left: compact ? 4 : 8,
+        right: compact ? 4 : 8,
+      ),
       child: Row(
         children: [
           IconButton(
             onPressed: onBack,
-            icon: const Icon(Icons.keyboard_arrow_down, size: 28),
+            icon: Icon(Icons.keyboard_arrow_down, size: compact ? 24 : 28),
             color: Colors.white.withValues(alpha: 0.6),
+            padding: compact ? EdgeInsets.zero : null,
+            constraints: compact
+                ? const BoxConstraints.tightFor(width: 32, height: 32)
+                : null,
             style: IconButton.styleFrom(
               backgroundColor: Colors.white.withValues(alpha: 0.05),
             ),
@@ -404,8 +517,15 @@ class _PlayerHeader extends ConsumerWidget {
           const Spacer(),
           IconButton(
             onPressed: onTogglePage,
-            icon: Icon(currentPage == 0 ? Icons.lyrics : Icons.album, size: 20),
+            icon: Icon(
+              currentPage == 0 ? Icons.lyrics : Icons.album,
+              size: compact ? 18 : 20,
+            ),
             color: Colors.white.withValues(alpha: 0.6),
+            padding: compact ? EdgeInsets.zero : null,
+            constraints: compact
+                ? const BoxConstraints.tightFor(width: 32, height: 32)
+                : null,
             style: IconButton.styleFrom(
               backgroundColor: Colors.white.withValues(alpha: 0.05),
             ),
@@ -419,7 +539,16 @@ class _PlayerHeader extends ConsumerWidget {
 class _PlayerCoverPage extends ConsumerWidget {
   final bool isPlaying;
   final VoidCallback? onTapCover;
-  const _PlayerCoverPage({required this.isPlaying, this.onTapCover});
+
+  /// 显式指定封面边长；为 null 时按断点取 [ResponsiveLayout.albumArtSize]。
+  /// 手机横屏用剩余高度动态计算，避免溢出。
+  final double? coverSize;
+
+  const _PlayerCoverPage({
+    required this.isPlaying,
+    this.onTapCover,
+    this.coverSize,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -430,8 +559,10 @@ class _PlayerCoverPage extends ConsumerWidget {
     final dominantColor = coverColorAsync.whenOrNull(
       data: (result) => result?.dominantColor,
     );
-    final coverSize = ResponsiveLayout.albumArtSize(context);
-    final borderRadius = ResponsiveLayout.isTablet(context) ? 28.0 : 24.0;
+    final coverSize =
+        this.coverSize ?? ResponsiveLayout.albumArtSize(context);
+    final radius = ResponsiveLayout.isTablet(context) ? 28.0 : 24.0;
+    final borderRadius = math.min(radius, coverSize * 0.12);
 
     return Center(
       child: GestureDetector(
@@ -458,13 +589,13 @@ class _PlayerCoverPage extends ConsumerWidget {
                             .toColor()
                             .withValues(alpha: 0.4)
                       : Colors.black.withValues(alpha: 0.5),
-                  blurRadius: 50,
-                  offset: const Offset(0, 25),
+                  blurRadius: math.min(50, coverSize * 0.16),
+                  offset: Offset(0, math.min(25, coverSize * 0.08)),
                 ),
               ],
             ),
             clipBehavior: Clip.antiAlias,
-            child: _buildCoverImage(song, ResponsiveLayout.albumArtSize(context)),
+            child: _buildCoverImage(song, coverSize),
           ),
         ),
       ),
@@ -524,13 +655,24 @@ class _PlayerCoverPage extends ConsumerWidget {
   }
 }
 
+/// 横屏（手机/平板）歌词字号放大倍数：横屏歌词区更宽更矮，
+/// 竖屏的 22pt 在横屏下偏小。仅横屏生效，竖屏保持原样。
+const double _landscapeLyricFontScale = 1.55;
+
 class _PlayerLyricsPage extends ConsumerWidget {
   final GlobalKey<AmllLyricPlayerState> amllKey;
 
   /// 退出动画期间隐藏 AMLL WebView（平台视图不参与滑动合成）。
   final bool hideWebView;
 
-  const _PlayerLyricsPage({required this.amllKey, required this.hideWebView});
+  /// 是否处于横屏布局。横屏时歌词区域更宽但更矮，字号相应放大。
+  final bool landscape;
+
+  const _PlayerLyricsPage({
+    required this.amllKey,
+    required this.hideWebView,
+    this.landscape = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -561,9 +703,11 @@ class _PlayerLyricsPage extends ConsumerWidget {
     }
     final inactiveColor = Colors.white.withValues(alpha: 0.4);
     final hasYrc = lyricState.hasYrc;
-    final baseFontSize = 22.0 * fontSizeScale;
-    final transFontSize = 15.0 * fontSizeScale;
-    final romanFontSize = 13.0 * fontSizeScale;
+    // 横屏（手机/平板）时歌词区更宽更矮，22pt 显得过小，统一放大。
+    final layoutScale = landscape ? _landscapeLyricFontScale : 1.0;
+    final baseFontSize = 22.0 * fontSizeScale * layoutScale;
+    final transFontSize = 15.0 * fontSizeScale * layoutScale;
+    final romanFontSize = 13.0 * fontSizeScale * layoutScale;
     final watchFontFamily = ref.watch(lyricFontFamilyProvider);
     final watchFontRate = ref.watch(lyricFontRateProvider);
     final watchFontWeight = ref.watch(lyricFontWeightProvider);
@@ -625,7 +769,7 @@ class _PlayerLyricsPage extends ConsumerWidget {
                     lines: lyricState.lines,
                     currentTimeMs: position.inMilliseconds,
                     isPlaying: isPlaying,
-                    fontSizeRate: watchFontRate,
+                    fontSizeRate: watchFontRate * layoutScale,
                     fontFamily: watchFontFamily,
                     fontWeight: watchFontWeight,
                     showTranslation: showTranslation,
@@ -688,6 +832,34 @@ class _PlayerLyricsPage extends ConsumerWidget {
 }
 
 class _PlayerSongInfo extends ConsumerWidget {
+  /// 紧凑模式：手机横屏等高度受限的场景。
+  final bool compact;
+
+  /// 侧栏模式：渲染为「封面右侧的信息列」——歌名/歌手 左对齐，
+  /// 收藏与功能菜单另起一行；不加外层水平内边距（由调用方留白）。
+  /// 手机横屏左栏使用；默认 false 时为「左对齐歌名 + 右侧图标」的横排布局。
+  final bool side;
+
+  const _PlayerSongInfo({this.compact = false, this.side = false});
+
+  void _toggleFavorite(WidgetRef ref, Song? song) {
+    if (song == null) return;
+    final playlistsAsyncVal = ref.read(playlistsProvider);
+    playlistsAsyncVal.whenData((playlists) {
+      final fav = playlists.where((p) => p.id == '__favorites__').firstOrNull;
+      final isFavorited = fav?.songs.any((s) => s.id == song.id) ?? false;
+      if (isFavorited) {
+        ref
+            .read(playlistsProvider.notifier)
+            .removeSongFromPlaylist('__favorites__', song.id);
+      } else {
+        ref
+            .read(playlistsProvider.notifier)
+            .addSongToPlaylist('__favorites__', song);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(currentSongIdentityProvider);
@@ -705,77 +877,92 @@ class _PlayerSongInfo extends ConsumerWidget {
         ) ??
         false;
 
+    final buttonConstraints = compact
+        ? const BoxConstraints.tightFor(width: 30, height: 30)
+        : null;
+    final favoriteButton = IconButton(
+      onPressed: () => _toggleFavorite(ref, song),
+      icon: Icon(
+        isFavorite ? Icons.favorite : Icons.favorite_border,
+        size: compact ? 18 : 24,
+        color: isFavorite ? Colors.red : Colors.white.withValues(alpha: 0.7),
+      ),
+      padding: compact ? EdgeInsets.zero : null,
+      constraints: buttonConstraints,
+    );
+    final moreButton = IconButton(
+      onPressed: song != null
+          ? () => SongActionSheet.showPlayerMenu(context, song: song)
+          : null,
+      icon: Icon(
+        Icons.more_horiz,
+        size: compact ? 18 : 24,
+        color: Colors.white.withValues(alpha: 0.7),
+      ),
+      padding: compact ? EdgeInsets.zero : null,
+      constraints: buttonConstraints,
+    );
+
+    final title = Text(
+      song?.title ?? context.tr('未知歌曲'),
+      style: TextStyle(
+        fontSize: compact ? 18 : 20,
+        fontWeight: FontWeight.w600,
+        color: Colors.white,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+    final artist = Text(
+      song?.artist ?? context.tr('未知歌手'),
+      style: TextStyle(
+        fontSize: compact ? 13 : 14,
+        color: Colors.white.withValues(alpha: 0.6),
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+    final actions = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        favoriteButton,
+        SizedBox(width: compact ? 18 : 28),
+        moreButton,
+      ],
+    );
+
+    // 侧栏模式：封面右侧的信息列。歌名/歌手左对齐，收藏与功能菜单也左对齐，
+    // 与歌名/歌手左侧齐平。
+    if (side) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          title,
+          SizedBox(height: compact ? 4 : 6),
+          artist,
+          SizedBox(height: compact ? 10 : 14),
+          actions,
+        ],
+      );
+    }
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 12 : 32,
+        vertical: compact ? 2 : 8,
+      ),
       child: Row(
         children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  song?.title ?? context.tr('未知歌曲'),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  song?.artist ?? context.tr('未知歌手'),
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.white.withValues(alpha: 0.6),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+              children: [title, SizedBox(height: compact ? 1 : 4), artist],
             ),
           ),
-          IconButton(
-            onPressed: () {
-              if (song == null) return;
-              final playlistsAsyncVal = ref.read(playlistsProvider);
-              playlistsAsyncVal.whenData((playlists) {
-                final fav = playlists
-                    .where((p) => p.id == '__favorites__')
-                    .firstOrNull;
-                final isFavorited =
-                    fav?.songs.any((s) => s.id == song.id) ?? false;
-                if (isFavorited) {
-                  ref
-                      .read(playlistsProvider.notifier)
-                      .removeSongFromPlaylist('__favorites__', song.id);
-                } else {
-                  ref
-                      .read(playlistsProvider.notifier)
-                      .addSongToPlaylist('__favorites__', song);
-                }
-              });
-            },
-            icon: Icon(
-              isFavorite ? Icons.favorite : Icons.favorite_border,
-              size: 24,
-              color: isFavorite
-                  ? Colors.red
-                  : Colors.white.withValues(alpha: 0.7),
-            ),
-          ),
-          IconButton(
-            onPressed: song != null
-                ? () => SongActionSheet.showPlayerMenu(context, song: song)
-                : null,
-            icon: Icon(
-              Icons.more_horiz,
-              size: 24,
-              color: Colors.white.withValues(alpha: 0.7),
-            ),
-          ),
+          favoriteButton,
+          moreButton,
         ],
       ),
     );
@@ -783,6 +970,11 @@ class _PlayerSongInfo extends ConsumerWidget {
 }
 
 class _PlayerProgressBar extends ConsumerWidget {
+  /// 紧凑模式：手机横屏等高度受限的场景。
+  final bool compact;
+
+  const _PlayerProgressBar({this.compact = false});
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final position = ref.watch(
@@ -799,6 +991,7 @@ class _PlayerProgressBar extends ConsumerWidget {
     );
 
     return PlayerProgressBar(
+      compact: compact,
       progress:
           (duration.inMilliseconds > 0
                   ? position.inMilliseconds / duration.inMilliseconds
@@ -823,7 +1016,11 @@ class _PlayerProgressBar extends ConsumerWidget {
 
 class _PlayerControls extends ConsumerWidget {
   final VoidCallback onQueue;
-  const _PlayerControls({required this.onQueue});
+
+  /// 紧凑模式：手机横屏等高度受限的场景。
+  final bool compact;
+
+  const _PlayerControls({required this.onQueue, this.compact = false});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -839,6 +1036,7 @@ class _PlayerControls extends ConsumerWidget {
     final controller = ref.read(playbackControllerProvider.notifier);
 
     return PlaybackControlRow(
+      compact: compact,
       isPlaying: isPlaying,
       isLoading: isLoading,
       playMode: playMode,

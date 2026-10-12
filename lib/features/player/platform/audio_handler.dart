@@ -594,6 +594,27 @@ class MusicAudioHandler extends BaseAudioHandler
     await super.stop();
   }
 
+  /// 清空整个媒体会话：停止播放并抹掉通知栏 / 系统媒体控制里的曲目信息。
+  ///
+  /// 仅调用 [stop] 是不够的——那只会把通知栏切到「暂停」状态，旧曲目的
+  /// 标题/封面会一直留在通知栏，点进去还会让人以为 App 里仍在播放。
+  /// 这里额外把 `queue` 与 `mediaItem` 置空，使 Android 侧收回通知。
+  Future<void> clearMediaSession() async {
+    debugPrint('MusicAudioHandler: 清空媒体会话');
+    try {
+      await _player.stop();
+    } catch (e) {
+      debugPrint('MusicAudioHandler: clearMediaSession stop error: $e');
+    }
+    queue.add(const <MediaItem>[]);
+    mediaItem.add(null);
+    try {
+      await super.stop();
+    } catch (e) {
+      debugPrint('MusicAudioHandler: clearMediaSession super.stop error: $e');
+    }
+  }
+
   @override
   Future<void> seek(Duration position) async {
     debugPrint('MusicAudioHandler: 跳转到 ${position.inSeconds}秒');

@@ -32,6 +32,9 @@ class PlayerProgressBar extends StatefulWidget {
   final List<String> availableQualities;
   final ValueChanged<String>? onQualityTap;
 
+  /// 紧凑模式：用于手机横屏等高度受限的场景，压缩内边距。
+  final bool compact;
+
   const PlayerProgressBar({
     super.key,
     required this.progress,
@@ -41,6 +44,7 @@ class PlayerProgressBar extends StatefulWidget {
     this.currentQuality = '320k',
     this.availableQualities = const [],
     this.onQualityTap,
+    this.compact = false,
   });
 
   @override
@@ -130,8 +134,9 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
 
   @override
   Widget build(BuildContext context) {
+    final compact = widget.compact;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -159,16 +164,17 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
             },
             behavior: HitTestBehavior.opaque,
             child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: EdgeInsets.symmetric(vertical: compact ? 4 : 12),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final barWidth = constraints.maxWidth;
                   final progressWidth = barWidth * _displayProgress;
+                  final barHeight = compact ? 4.0 : 6.0;
                   return Stack(
                     clipBehavior: Clip.none,
                     children: [
                       SizedBox(
-                        height: 6,
+                        height: barHeight,
                         child: Container(
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.2),
@@ -177,7 +183,7 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
                         ),
                       ),
                       SizedBox(
-                        height: 6,
+                        height: barHeight,
                         child: Container(
                           width: progressWidth,
                           decoration: BoxDecoration(
@@ -229,7 +235,7 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
                         : widget.position,
                   ),
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: compact ? 11 : 12,
                     color: Colors.white.withValues(alpha: 0.6),
                     fontWeight: FontWeight.w500,
                     letterSpacing: 1,
@@ -262,7 +268,7 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
                 Text(
                   _formatDuration(widget.duration),
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: compact ? 11 : 12,
                     color: Colors.white.withValues(alpha: 0.6),
                     fontWeight: FontWeight.w500,
                     letterSpacing: 1,
@@ -287,6 +293,9 @@ class PlaybackControlRow extends StatelessWidget {
   final VoidCallback onCycleMode;
   final VoidCallback onQueue;
 
+  /// 紧凑模式：用于手机横屏等高度受限的场景，缩小按钮与内边距。
+  final bool compact;
+
   const PlaybackControlRow({
     super.key,
     required this.isPlaying,
@@ -297,28 +306,74 @@ class PlaybackControlRow extends StatelessWidget {
     required this.onNext,
     required this.onCycleMode,
     required this.onQueue,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final compact = this.compact;
+    final modeButton = _ControlButton(
+      icon: _playModeIcon,
+      size: compact ? 20 : 20,
+      boxSize: compact ? 40 : 48,
+      onPressed: onCycleMode,
+    );
+    final previousButton = _ControlButton(
+      icon: Icons.skip_previous,
+      size: compact ? 24 : 24,
+      boxSize: compact ? 40 : 48,
+      onPressed: onPrevious,
+    );
+    final playButton = _PlayPauseButton(
+      isPlaying: isPlaying,
+      isLoading: isLoading,
+      compact: compact,
+      onPressed: onPlayPause,
+    );
+    final nextButton = _ControlButton(
+      icon: Icons.skip_next,
+      size: compact ? 24 : 24,
+      boxSize: compact ? 40 : 48,
+      onPressed: onNext,
+    );
+    final queueButton = _ControlButton(
+      icon: Icons.queue_music,
+      size: compact ? 22 : 22,
+      boxSize: compact ? 40 : 48,
+      onPressed: onQueue,
+    );
+
+    if (compact) {
+      // 紧凑模式：固定小间距居中排列，不再均分整行（手机横屏空间有限）。
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            modeButton,
+            const SizedBox(width: 10),
+            previousButton,
+            const SizedBox(width: 6),
+            playButton,
+            const SizedBox(width: 6),
+            nextButton,
+            const SizedBox(width: 10),
+            queueButton,
+          ],
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _ControlButton(icon: _playModeIcon, size: 20, onPressed: onCycleMode),
-          _ControlButton(
-            icon: Icons.skip_previous,
-            size: 24,
-            onPressed: onPrevious,
-          ),
-          _PlayPauseButton(
-            isPlaying: isPlaying,
-            isLoading: isLoading,
-            onPressed: onPlayPause,
-          ),
-          _ControlButton(icon: Icons.skip_next, size: 24, onPressed: onNext),
-          _ControlButton(icon: Icons.queue_music, size: 22, onPressed: onQueue),
+          modeButton,
+          previousButton,
+          playButton,
+          nextButton,
+          queueButton,
         ],
       ),
     );
@@ -339,23 +394,26 @@ class PlaybackControlRow extends StatelessWidget {
 class _ControlButton extends StatelessWidget {
   final IconData icon;
   final double size;
+  final double boxSize;
   final VoidCallback onPressed;
 
   const _ControlButton({
     required this.icon,
     required this.size,
     required this.onPressed,
+    this.boxSize = 48,
   });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 48,
-      height: 48,
+      width: boxSize,
+      height: boxSize,
       child: IconButton(
         onPressed: onPressed,
         icon: Icon(icon, size: size),
         color: Colors.white.withValues(alpha: 0.7),
+        padding: EdgeInsets.zero,
         style: IconButton.styleFrom(
           hoverColor: Colors.white.withValues(alpha: 0.1),
         ),
@@ -367,23 +425,26 @@ class _ControlButton extends StatelessWidget {
 class _PlayPauseButton extends StatelessWidget {
   final bool isPlaying;
   final bool isLoading;
+  final bool compact;
   final VoidCallback onPressed;
 
   const _PlayPauseButton({
     required this.isPlaying,
     required this.isLoading,
     required this.onPressed,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final diameter = compact ? 54.0 : 64.0;
     return GestureDetector(
       // 遵循 CeruMusic/Sollin-Music：加载期间禁用按钮，避免连点
       onTap: isLoading ? null : onPressed,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        width: 64,
-        height: 64,
+        width: diameter,
+        height: diameter,
         decoration: BoxDecoration(
           color: Colors.white,
           shape: BoxShape.circle,
@@ -396,11 +457,11 @@ class _PlayPauseButton extends StatelessWidget {
           ],
         ),
         child: isLoading
-            ? const Center(
+            ? Center(
                 child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(
+                  width: compact ? 20 : 24,
+                  height: compact ? 20 : 24,
+                  child: const CircularProgressIndicator(
                     strokeWidth: 2.5,
                     color: Colors.black,
                   ),
@@ -408,7 +469,7 @@ class _PlayPauseButton extends StatelessWidget {
               )
             : Icon(
                 isPlaying ? Icons.pause : Icons.play_arrow,
-                size: 32,
+                size: compact ? 26 : 32,
                 color: Colors.black,
               ),
       ),

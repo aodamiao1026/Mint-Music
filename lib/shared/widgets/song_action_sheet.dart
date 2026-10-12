@@ -45,6 +45,79 @@ String _estimateSize(String qualityId, int durationSec) {
   return '${(sizeBytes / (1024 * 1024)).toStringAsFixed(2)}MB';
 }
 
+/// 弹层最大高度占屏高的比例：横屏时可用高度很小，限制后内容可滚动，
+/// 既不会出现黄黑斜条，也不会让弹层顶满全屏。
+const double _sheetMaxHeightRatio = 0.85;
+
+/// 通用可滚动底部弹层容器：拖拽条与标题固定在顶部，内容区超出时滚动。
+///
+/// 修复横屏/小屏下的 "BOTTOM OVERFLOWED BY xxx PIXELS"：
+/// Flutter 在 `isScrollControlled == false` 时会把弹层高度限制为
+/// 9/16 屏高（见 SDK 中 `_defaultScrollControlDisabledMaxHeightRatio`），
+/// 而这些弹层用的是 `Column(mainAxisSize: min)` + 固定子项，
+/// 高度一变就会溢出成黄黑斜条。
+class _ScrollableSheet extends StatelessWidget {
+  final String? title;
+
+  /// 标题下方的内容，超出时自动滚动。
+  final List<Widget> children;
+
+  const _ScrollableSheet({required this.children, this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * _sheetMaxHeightRatio,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              if (title != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  title!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [...children, const SizedBox(height: 16)],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class SongActionSheet extends ConsumerStatefulWidget {
   final Song song;
   final List<Song>? playlistSongs;
@@ -55,6 +128,16 @@ class SongActionSheet extends ConsumerStatefulWidget {
   final bool showDelete;
   final VoidCallback? onDelete;
   final bool compactMode;
+
+  /// 是否在「播放」下方额外展示「播放并替换播放列表」。
+  ///
+  /// - `false`（默认）：只显示「播放」，其行为由 [playlistSongs] 决定
+  ///   （传入列表 = 整张列表依次播放，否则仅播放当前这一首）。
+  /// - `true`：额外提供「播放并替换播放列表」，无视 [playlistSongs]，
+  ///   强制把播放队列替换为仅包含当前这一首。
+  ///
+  /// 仅搜索结果这类「列表很长、只想单曲立即试听」的场景需要开启。
+  final bool showPlayAndReplaceQueue;
 
   const SongActionSheet({
     super.key,
@@ -67,6 +150,7 @@ class SongActionSheet extends ConsumerStatefulWidget {
     this.showDelete = false,
     this.onDelete,
     this.compactMode = false,
+    this.showPlayAndReplaceQueue = false,
   });
 
   static Future<void> show(
@@ -79,6 +163,7 @@ class SongActionSheet extends ConsumerStatefulWidget {
     VoidCallback? onAccurateMatch,
     bool showDelete = false,
     VoidCallback? onDelete,
+    bool showPlayAndReplaceQueue = false,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -95,6 +180,7 @@ class SongActionSheet extends ConsumerStatefulWidget {
         onAccurateMatch: onAccurateMatch,
         showDelete: showDelete,
         onDelete: onDelete,
+        showPlayAndReplaceQueue: showPlayAndReplaceQueue,
       ),
     );
   }
@@ -220,6 +306,13 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
                     label: context.tr('播放'),
                     onTap: _play,
                   ),
+                  if (widget.showPlayAndReplaceQueue)
+                    _buildActionItem(
+                      colors: colors,
+                      icon: Icons.playlist_play,
+                      label: context.tr('播放并替换播放列表'),
+                      onTap: _playAndReplaceQueue,
+                    ),
                   _buildActionItem(
                     colors: colors,
                     icon: Icons.playlist_add,
@@ -492,66 +585,39 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
       context: context,
       sheetAnimationStyle: _sheetAnimationStyle,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      isScrollControlled: true,
+      builder: (ctx) => _ScrollableSheet(
+        title: ctx.tr('播放速度'),
+        children: [
+          ...speeds.map((label) {
+            final speed = double.parse(label.replaceAll('x', ''));
+            final isSelected = currentSpeed == speed;
+            return ListTile(
+              leading: Icon(
+                isSelected
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: isSelected
+                    ? AppColors.primary
+                    : AppColors.textSecondary,
               ),
-              const SizedBox(height: 16),
-              Text(
-                ctx.tr('播放速度'),
+              title: Text(
+                label,
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 12),
-              ...speeds.map((label) {
-                final speed = double.parse(label.replaceAll('x', ''));
-                final isSelected = currentSpeed == speed;
-                return ListTile(
-                  leading: Icon(
-                    isSelected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
-                    color: isSelected
-                        ? AppColors.primary
-                        : AppColors.textSecondary,
-                  ),
-                  title: Text(
-                    label,
-                    style: TextStyle(
-                      color: isSelected
-                          ? AppColors.primary
-                          : AppColors.textPrimary,
-                    ),
-                  ),
-                  onTap: () {
-                    ref.read(playbackSpeedProvider.notifier).state = speed;
-                    unawaited(_doPersistSpeed(speed));
-                    ref.read(audioHandlerProvider).setSpeed(speed);
-                    Navigator.pop(ctx);
-                  },
-                );
-              }),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
+              onTap: () {
+                ref.read(playbackSpeedProvider.notifier).state = speed;
+                unawaited(_doPersistSpeed(speed));
+                ref.read(audioHandlerProvider).setSpeed(speed);
+                Navigator.pop(ctx);
+              },
+            );
+          }),
+        ],
       ),
     );
   }
@@ -601,37 +667,13 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
       builder: (ctx) {
         // 使用 ProviderScope 读取/写入设置
         final container = ProviderScope.containerOf(ctx);
-        return Container(
-          decoration: const BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-          ),
+        return Padding(
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
           ),
-          child: SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 8),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.divider,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  ctx.tr('歌词设置'),
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 12),
+          child: _ScrollableSheet(
+            title: ctx.tr('歌词设置'),
+            children: [
                 // 字体设置行
                 _lyricSettingRow(
                   ctx,
@@ -742,9 +784,7 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
                 ),
                 // Apple Music 风格歌词
                 _buildAmllToggle(ctx, container),
-                const SizedBox(height: 16),
-              ],
-            ),
+            ],
           ),
         );
       },
@@ -932,88 +972,61 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
       context: ctx,
       sheetAnimationStyle: _sheetAnimationStyle,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (ctx2) {
         final c2 = ProviderScope.containerOf(ctx2);
-        return Container(
-          decoration: const BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-          ),
-          child: StatefulBuilder(
-            builder: (context, setSheetState) {
-              // 所有 provider 都必须在 StatefulBuilder.builder 内部读取，
-              // 这样 setSheetState 触发重建时才能拿到最新的值
-              final storedFamily = ProviderScope.containerOf(
-                context,
-              ).read(lyricFontFamilyProvider);
-              final familyDisplay =
-                  context.tr(fontNameMap[storedFamily] ?? '系统默认');
-              final storedRate = ProviderScope.containerOf(
-                context,
-              ).read(lyricFontRateProvider);
-              final rateDisplay = '${(storedRate * 100).toInt()}%';
-              final storedWeight = ProviderScope.containerOf(
-                context,
-              ).read(lyricFontWeightProvider);
-              return SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(height: 8),
-                    Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppColors.divider,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      context.tr('字体设置'),
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    // 字体选择
-                    _fontSettingRow(ctx2, c2, ctx2.tr('选择字体'), familyDisplay, () {
-                      _showFontFamilyPicker(ctx2, c2).then((_) {
-                        setSheetState(() {});
-                      });
-                    }),
-                    const Divider(
-                      height: 1,
-                      indent: 16,
-                      endIndent: 16,
-                      color: AppColors.divider,
-                    ),
-                    // 字体大小
-                    _fontSettingRow(ctx2, c2, ctx2.tr('字体大小'), rateDisplay, () {
-                      _showFontRatePicker(ctx2, c2).then((_) {
-                        setSheetState(() {});
-                      });
-                    }),
-                    const Divider(
-                      height: 1,
-                      indent: 16,
-                      endIndent: 16,
-                      color: AppColors.divider,
-                    ),
-                    // 字重
-                    _fontSettingRow(ctx2, c2, ctx2.tr('字重'), '$storedWeight', () {
-                      _showFontWeightPicker(ctx2, c2).then((_) {
-                        setSheetState(() {});
-                      });
-                    }),
-                    const SizedBox(height: 16),
-                  ],
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            // 所有 provider 都必须在 StatefulBuilder.builder 内部读取，
+            // 这样 setSheetState 触发重建时才能拿到最新的值
+            final storedFamily = ProviderScope.containerOf(
+              context,
+            ).read(lyricFontFamilyProvider);
+            final familyDisplay =
+                context.tr(fontNameMap[storedFamily] ?? '系统默认');
+            final storedRate = ProviderScope.containerOf(
+              context,
+            ).read(lyricFontRateProvider);
+            final rateDisplay = '${(storedRate * 100).toInt()}%';
+            final storedWeight = ProviderScope.containerOf(
+              context,
+            ).read(lyricFontWeightProvider);
+            return _ScrollableSheet(
+              title: context.tr('字体设置'),
+              children: [
+                // 字体选择
+                _fontSettingRow(ctx2, c2, ctx2.tr('选择字体'), familyDisplay, () {
+                  _showFontFamilyPicker(ctx2, c2).then((_) {
+                    setSheetState(() {});
+                  });
+                }),
+                const Divider(
+                  height: 1,
+                  indent: 16,
+                  endIndent: 16,
+                  color: AppColors.divider,
                 ),
-              );
-            },
-          ),
+                // 字体大小
+                _fontSettingRow(ctx2, c2, ctx2.tr('字体大小'), rateDisplay, () {
+                  _showFontRatePicker(ctx2, c2).then((_) {
+                    setSheetState(() {});
+                  });
+                }),
+                const Divider(
+                  height: 1,
+                  indent: 16,
+                  endIndent: 16,
+                  color: AppColors.divider,
+                ),
+                // 字重
+                _fontSettingRow(ctx2, c2, ctx2.tr('字重'), '$storedWeight', () {
+                  _showFontWeightPicker(ctx2, c2).then((_) {
+                    setSheetState(() {});
+                  });
+                }),
+              ],
+            );
+          },
         );
       },
     );
@@ -1081,69 +1094,41 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
     return showModalBottomSheet(
       context: ctx,
       backgroundColor: Colors.transparent,
-      builder: (ctx2) => Container(
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        child: SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                ctx2.tr('选择字体'),
+      isScrollControlled: true,
+      builder: (ctx2) => _ScrollableSheet(
+        title: ctx2.tr('选择字体'),
+        children: [
+          ...fonts.map(
+            (f) => ListTile(
+              title: Text(
+                ctx2.tr(f),
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+                  color: f == currentLabel
+                      ? AppColors.primary
+                      : AppColors.textPrimary,
                 ),
               ),
-              const SizedBox(height: 12),
-              ...fonts.map(
-                (f) => ListTile(
-                  title: Text(
-                    ctx2.tr(f),
-                    style: TextStyle(
-                      color: f == currentLabel
-                          ? AppColors.primary
-                          : AppColors.textPrimary,
-                    ),
-                  ),
-                  trailing: f == currentLabel
-                      ? const Icon(
-                          Icons.check,
-                          size: 18,
-                          color: AppColors.primary,
-                        )
-                      : null,
-                  onTap: () async {
-                    final val = revMap[f]!;
-                    container.read(lyricFontFamilyProvider.notifier).state =
-                        val;
-                    await _persistStringSetting(
-                      container,
-                      lyricFontFamilyProvider,
-                      val,
-                      (s) => s.setLyricFontFamily(val),
-                    );
-                    if (ctx2.mounted) Navigator.pop(ctx2);
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
+              trailing: f == currentLabel
+                  ? const Icon(
+                      Icons.check,
+                      size: 18,
+                      color: AppColors.primary,
+                    )
+                  : null,
+              onTap: () async {
+                final val = revMap[f]!;
+                container.read(lyricFontFamilyProvider.notifier).state = val;
+                await _persistStringSetting(
+                  container,
+                  lyricFontFamilyProvider,
+                  val,
+                  (s) => s.setLyricFontFamily(val),
+                );
+                if (ctx2.mounted) Navigator.pop(ctx2);
+              },
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1166,68 +1151,46 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
             builder: (context, setState) {
               final c2 = ProviderScope.containerOf(context);
               final rate = c2.read(lyricFontRateProvider);
-              return SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(height: 8),
-                    Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: AppColors.divider,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+              return _ScrollableSheet(
+                title: context.tr('字体大小'),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      context.tr('字体大小'),
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        children: [
-                          Text(
-                            '${(rate * 100).toInt()}%',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: AppColors.textPrimary,
-                            ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${(rate * 100).toInt()}%',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: AppColors.textPrimary,
                           ),
-                          Expanded(
-                            child: Slider(
-                              value: rate,
-                              min: 0.5,
-                              max: 2.0,
-                              divisions: 15,
-                              activeColor: AppColors.primary,
-                              onChanged: (v) async {
-                                c2.read(lyricFontRateProvider.notifier).state =
-                                    v;
-                                await _persistDoubleSetting(
-                                  container,
-                                  lyricFontRateProvider,
-                                  v,
-                                  (s) => s.setLyricFontRate(v),
-                                );
-                                setState(() {});
-                              },
-                            ),
+                        ),
+                        Expanded(
+                          child: Slider(
+                            value: rate,
+                            min: 0.5,
+                            max: 2.0,
+                            divisions: 15,
+                            activeColor: AppColors.primary,
+                            onChanged: (v) async {
+                              c2.read(lyricFontRateProvider.notifier).state = v;
+                              await _persistDoubleSetting(
+                                container,
+                                lyricFontRateProvider,
+                                v,
+                                (s) => s.setLyricFontRate(v),
+                              );
+                              setState(() {});
+                            },
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+                  ),
+                ],
               );
             },
           ),
@@ -1256,9 +1219,10 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
             builder: (context, setState) {
               final c2 = ProviderScope.containerOf(context);
               final current = c2.read(lyricFontWeightProvider);
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+              return SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                   const SizedBox(height: 8),
                   Container(
                     width: 40,
@@ -1314,7 +1278,8 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
                   }),
                   const SizedBox(height: 16),
                 ],
-              );
+              ),
+            );
             },
           ),
         ),
@@ -1395,6 +1360,13 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
     );
   }
 
+  /// 「播放并替换播放列表」：无视 [playlistSongs]，把播放队列替换为仅当前这一首。
+  Future<void> _playAndReplaceQueue() async {
+    await ref
+        .read(playbackControllerProvider.notifier)
+        .setQueue([widget.song]);
+  }
+
   void _toggleFavorite() {
     if (_isFavorited) {
       ref
@@ -1442,10 +1414,14 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).padding.bottom),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(ctx).size.height * 0.9,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                 const SizedBox(height: 12),
                 Container(
                   width: 40,
@@ -1469,6 +1445,7 @@ class _SongActionSheetState extends ConsumerState<SongActionSheet> {
                 const SizedBox(height: 16),
               ],
             ),
+          ),
           ),
         ),
       ),
