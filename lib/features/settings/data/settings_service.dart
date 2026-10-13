@@ -76,7 +76,13 @@ class SettingsService {
   Future<String> getDownloadDir() async {
     final persisted = _prefs.getString('download_dir');
     if (persisted != null && persisted.isNotEmpty) return persisted;
-    return '/storage/emulated/0/Music/MintMusic';
+    // Android 沿用公共音乐目录；iOS/桌面端没有公共存储概念，
+    // 默认落到应用沙盒 Documents 下的 MintMusic 目录。
+    if (Platform.isAndroid) return '/storage/emulated/0/Music/MintMusic';
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory('${docs.path}${Platform.pathSeparator}MintMusic');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir.path;
   }
 
   Future<void> setDownloadDir(String v) => _prefs.setString('download_dir', v);

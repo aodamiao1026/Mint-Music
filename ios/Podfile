@@ -39,5 +39,19 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    # Xcode 27 only supports deployment targets >= 15.0; raise any pod
+    # that declares an older minimum (9.0/12.0/13.x) up to the project's 15.0.
+    target.build_configurations.each do |config|
+      if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.0
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      end
+    end
   end
+
+  # NOTE: Xcode 27 had a transient actool issue ("Failed to write to CAR",
+  # BOMStorageCompact rename EPERM) when compiling DKPhotoGallery's
+  # Images.xcassets in a polluted DerivedData. A fully clean DerivedData
+  # resolves it, so the catalog is kept. If you hit the error locally:
+  #   rm -rf ~/Library/Developer/Xcode/DerivedData/Runner-*
+  #   flutter clean && flutter pub get && cd ios && pod install
 end

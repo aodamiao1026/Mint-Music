@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### iOS 适配
+- Runner 与全部 Pods 的 iOS 部署目标提升至 15.0（Xcode 27 最低要求，Podfile post_install 自动抬升旧 Pods）
+- 下载目录默认值改为平台自适应：iOS 使用应用沙盒 Documents/MintMusic，Android 保持公共 Music 目录
+- 修复 Xcode 27 下 actool "Failed to write to CAR" 报错的排查指引（清理 DerivedData）
+
 ## [1.0.1] - 2026-08-14
 
 ### 新增

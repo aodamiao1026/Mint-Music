@@ -5,8 +5,12 @@
 <h1 align="center">薄荷音乐 · MintMusic</h1>
 
 <p align="center">
-  <strong>一款基于 Flutter 的安卓音乐播放器</strong><br>
+  <strong>一款基于 Flutter 的跨平台音乐播放器</strong><br>
   在线曲库 · 本地音乐 · 逐字歌词 · 音效增强 · 多音源自动切换
+</p>
+
+<p align="center">
+  Android · iOS
 </p>
 
 <p align="center">
@@ -23,7 +27,7 @@
 
 ## 简介
 
-薄荷音乐（MintMusic）是一个开源的安卓音乐播放器，UI 与交互参考 [CeruMusic](https://github.com/timeshiftsauce/CeruMusic) 的设计理念，使用 Flutter 从零实现。支持多平台在线音乐聚合搜索、本地音乐管理、Apple Music 风格逐字歌词（AMLL）、下载、音效增强与音源插件扩展。
+薄荷音乐（MintMusic）是一个开源的跨平台音乐播放器（Android / iOS），UI 与交互参考 [CeruMusic](https://github.com/timeshiftsauce/CeruMusic) 的设计理念，使用 Flutter 从零实现。支持多平台在线音乐聚合搜索、本地音乐管理、Apple Music 风格逐字歌词（AMLL）、下载、音效增强与音源插件扩展。
 
 ## 截图预览
 

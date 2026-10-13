@@ -51,3 +51,6 @@ node_modules/
 tools/
 fix_encoding.js
 tx_qrc_hex*.txt
+
+# FVM Version Cache
+.fvm/
