@@ -74,6 +74,70 @@ class PluginService {
     return pluginsDir.path;
   }
 
+  /// 把持久化的插件路径解析为当前可用的 [File]，找不到时返回 null。
+  ///
+  /// iOS 的沙盒数据容器路径（含 UUID 前缀）不保证跨启动稳定，持久化的
+  /// 绝对路径在重启/容器迁移后会失效，但 Documents 下的文件本体会被
+  /// 系统整体迁移到新容器。因此这里始终以“当前 Documents 目录 + 相对
+  /// 路径”重新定位，并在命中后把持久化路径修复为相对路径。
+  Future<File?> resolvePluginFile(PluginInfo plugin) async {
+    final stored = plugin.filePath;
+    if (stored == null || stored.isEmpty) return null;
+
+    var path = stored;
+    if (path.startsWith('file://')) {
+      path = Uri.parse(path).toFilePath();
+    }
+    final normalized = path.replaceAll('\\', '/');
+    final docsPath = (await getApplicationDocumentsDirectory()).path;
+    final normalizedDocs = docsPath.replaceAll('\\', '/');
+
+    // 绝对路径 → 相对 Documents 的子路径；相对路径原样保留
+    String relative;
+    if (normalized.startsWith('/')) {
+      if (normalized.startsWith(normalizedDocs)) {
+        relative = normalized.substring(normalizedDocs.length);
+      } else {
+        // 旧绝对路径指向已失效的容器前缀：按文件名回退到 plugins 目录
+        relative = '/plugins/${normalized.split('/').last}';
+      }
+    } else {
+      relative = normalized;
+    }
+    while (relative.startsWith('/')) {
+      relative = relative.substring(1);
+    }
+
+    final resolved = File('$docsPath/$relative');
+    if (await resolved.exists()) {
+      if (stored != relative) {
+        await _repairPluginPath(plugin.id, relative);
+      }
+      return resolved;
+    }
+
+    // 最终兜底：按文件名在 plugins 目录中查找（历史路径格式未知时）
+    final basename = normalized.split('/').last;
+    final fallback = File('$docsPath/plugins/$basename');
+    if (await fallback.exists()) {
+      if (stored != 'plugins/$basename') {
+        await _repairPluginPath(plugin.id, 'plugins/$basename');
+      }
+      return fallback;
+    }
+    return null;
+  }
+
+  /// 把已失效的插件路径修复为相对 Documents 的路径并持久化。
+  Future<void> _repairPluginPath(String id, String relativePath) async {
+    final plugins = await loadPlugins();
+    final index = plugins.indexWhere((p) => p.id == id);
+    if (index == -1) return;
+    plugins[index] = plugins[index].copyWith(filePath: relativePath);
+    await savePlugins(plugins);
+    print('[PluginService] 已修复插件路径: $id -> $relativePath');
+  }
+
   Future<PluginInfo> selectAndAddPlugin(String type) async {
     final result = await FilePicker.platform.pickFiles(
       dialogTitle: '请选择你的 ${type == 'lx' ? '洛雪' : '澜音'} js插件',
@@ -381,7 +445,9 @@ class PluginService {
         type: type,
         installTime: DateTime.now(),
         supportedSources: sources,
-        filePath: destPath,
+        // 只存相对 Documents 的路径：iOS 沙盒容器 UUID 跨启动会变，
+        // 绝对路径重启后即失效。加载时经 resolvePluginFile 重新解析。
+        filePath: 'plugins/${pluginId}_$safeName',
         isEnabled: plugins.isEmpty,
         updateUrl: pluginInfo.homepage ?? sourceUrl,
       );
@@ -459,8 +525,8 @@ class PluginService {
     if (filePath == null) {
       throw Exception('插件文件路径不存在');
     }
-    final file = File(filePath);
-    if (!await file.exists()) {
+    final file = await resolvePluginFile(plugin);
+    if (file == null) {
       throw Exception('插件文件不存在: $filePath');
     }
     final prepared = await _prepareStoredPluginCode(plugin, file);
@@ -488,11 +554,12 @@ class PluginService {
     final plugin = plugins.where((p) => p.id == id).firstOrNull;
 
     if (plugin?.filePath != null) {
-      final file = File(plugin!.filePath!);
-      if (await file.exists()) {
+      // 经 resolvePluginFile 重定位，兼容旧数据中已失效的绝对路径
+      final file = await resolvePluginFile(plugin!);
+      if (file != null) {
         await file.delete();
       }
-      final sourceFile = File('${file.path}.source.js');
+      final sourceFile = File('${file?.path ?? plugin.filePath}.source.js');
       if (await sourceFile.exists()) {
         await sourceFile.delete();
       }
@@ -589,8 +656,8 @@ class PluginService {
       throw Exception('插件文件路径不存在');
     }
 
-    final file = File(filePath);
-    if (!await file.exists()) {
+    final file = await resolvePluginFile(plugin);
+    if (file == null) {
       throw Exception('插件文件不存在: $filePath');
     }
 
